@@ -4,12 +4,20 @@ local M = {}
 
 local winsize = nil
 
+-- Wire up the async CSI 16t update callback so that when the terminal
+-- responds with real pixel dimensions, the cached size is refreshed.
+local _system = require'mdmath.terminfo._system'
+_system._on_update = function(new_size)
+    winsize = new_size
+end
+
 function M.size()
     if winsize == nil then
-        winsize, err = require'mdmath.terminfo._system'.request_size()
-        if not winsize then
-            error('Failed to get terminal size: code ' .. err)
+        local s, err = _system.request_size()
+        if not s then
+            error('Failed to get terminal size: code ' .. tostring(err))
         end
+        winsize = s
     end
 
     return winsize
