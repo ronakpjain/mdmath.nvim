@@ -88,6 +88,35 @@ Currently, it only supports rendering the image inline, features like rendering 
 
 If you are using TMUX, remember to enable `allow-passthrough` in your `~/.tmux.conf`.
 
+## Equations inside comments
+
+When the plugin is enabled for a filetype that has a Tree-sitter parser, equations are also searched
+inside comments:
+
+```python
+# $E = mc^2$                     inline equation
+# $$\int_0^1 x^2 dx$$            display equation
+```
+
+```lua
+--[[ $$\int_0^1 x^2 dx$$ ]]       block comment
+```
+
+This needs no extra configuration, just add the filetype to `filetypes`. Equations are searched in
+any node of the buffer's language that is named like a comment (`comment`, `line_comment`,
+`block_comment`, ...).
+
+Since `$` is very common inside comments (`$HOME`, `$PATH`, `$1`), single-dollar equations are only
+accepted when there is no whitespace directly after/before the delimiters (`$ x $` is ignored),
+unless they contain commands or sub/superscripts (`$ x^2 $` is accepted). Multiline `$$` blocks are
+only found inside block comments, with the delimiters on lines of their own.
+
+## Testing
+
+```sh
+nvim -l tests/blocks.lua
+```
+
 ## Looking to the future!
 
 The plugin is currently at alpha, many features are planned for the next versions, here are some of the planned features, also you have any suggestions, feel free to open an issue:

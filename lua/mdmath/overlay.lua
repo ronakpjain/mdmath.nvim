@@ -1,3 +1,4 @@
+local blocks = require'mdmath.blocks'
 local nvim = require'mdmath.nvim'
 local util = require'mdmath.util'
 local ts = vim.treesitter
@@ -25,8 +26,27 @@ end
 function Buffer:_init(bufnr)
     self.bufnr = bufnr
     self.equations = {}
-    self.parser = get_parser(bufnr, 'markdown')
     self.active = true
+
+    -- Buffers with their own Tree-sitter parser have equations searched inside
+    -- comments. Everything else (like `pi` buffers, which are markdown-like but
+    -- have no parser) falls back to the markdown parser, where the equations
+    -- are found directly in the buffer text.
+    local filetype = vim.bo[bufnr].filetype
+    local lang = ts.language.get_lang(filetype) or filetype
+    local parser = nil
+    if lang ~= 'markdown' then
+        local ok, result = pcall(ts.get_parser, bufnr, lang)
+        parser = ok and result or nil
+    end
+
+    if parser then
+        self.lang = lang
+        self.parser = parser
+    else
+        self.lang = 'markdown'
+        self.parser = get_parser(bufnr, 'markdown')
+    end
     self.timer = uv.new_timer()
     assert(self.timer, 'failed to create a timer')
 
@@ -117,48 +137,36 @@ function Buffer:parse(start_row, end_row)
     assert(type(end_row) == 'number', 'end_row must be a number')
 
     local bufnr = self.bufnr
-    local parser = self.parser
-    parser:parse({start_row, end_row})
 
-    -- FIX: Almost sure we can move this block to initialization
-    local inline_lang = 'markdown_inline'
-    local inlines = parser:children()[inline_lang]
-    if not inlines then
+    local found
+    if self.lang == 'markdown' then
+        found = blocks.find_markdown(bufnr, self.parser, start_row, end_row)
+    else
+        found = blocks.find_comments(bufnr, self.parser, start_row, end_row)
+    end
+    if not found then
         return nil
     end
-    local query = vim.treesitter.query.parse(inline_lang, '(latex_block) @block')
 
     local old_equations = self.equations
     local equations = {}
 
-    local function process_equation(sr, sc, er, ec, text)
+    for _, block in ipairs(found) do
         -- FIXME: Iterating over all equations is not efficient, we can use a hash table
         local equation = nil
         for key, eq in ipairs(old_equations) do
-            if eq ~= 0 and eq.valid and eq.pos[1] == sr and eq.pos[2] == sc and eq.text == text then
+            if eq ~= 0 and eq.valid and eq.pos[1] == block.sr and eq.pos[2] == block.sc and eq.text == block.text then
                 equation = eq
                 old_equations[key] = 0
                 break
             end
         end
 
-        equation = equation or Equation.new(bufnr, sr, sc, text)
+        equation = equation or Equation.new(bufnr, block.sr, block.sc, block.text)
         if equation then
             table.insert(equations, equation)
         end
     end
-
-    local function get_queries(tree)
-        local root = tree:root()
-
-        for _, node in query:iter_captures(root, 0, start_row, end_row) do
-            local sr, sc, er, ec = node:range()
-            local value = ts.get_node_text(node, 0)
-
-            process_equation(sr, sc, er, ec, value)
-        end
-    end
-    inlines:for_each_tree(get_queries)
 
     for _, eq in ipairs(old_equations) do
         if eq ~= 0 and eq.valid then
